@@ -33,16 +33,18 @@ public class QueryEstudianteService implements IQueryEstudianteService {
     @Override
     public RespuestaGeneralDTO loginEstudiante(LoginEstudianteDTO loginEstudianteDTO) {
         RespuestaGeneralDTO respuestaGeneralDto = new RespuestaGeneralDTO();
-        respuestaGeneralDto.setMessage("Se inicio correctamente");
-        respuestaGeneralDto.setStatus(HttpStatus.OK);
         try{
             authenticationManager.authenticate(new UsernamePasswordAuthenticationToken(loginEstudianteDTO.getCodigoEstudiante(), loginEstudianteDTO.getNumeroDocumento()));
             EstudianteEntity estudiante = estudianteReplicaRepository.findByCodigoEstudiante(loginEstudianteDTO.getCodigoEstudiante()).orElseThrow();
             UserDetails user = new EstudianteSeguridadDTO(estudianteMapper.entityToDto(estudiante));
             String token = jwtService.getToken(user);
             respuestaGeneralDto.setData(AuthResponseDTO.builder().token(token).build());
+            respuestaGeneralDto.setMessage("Se inicio correctamente");
+            respuestaGeneralDto.setStatus(HttpStatus.OK);
         }catch (Exception e){
             log.error("Error ", e);
+            respuestaGeneralDto.setMessage("Hubo un error en el login del estudiante");
+            respuestaGeneralDto.setStatus(HttpStatus.INTERNAL_SERVER_ERROR);
         }
         return respuestaGeneralDto;
     }
