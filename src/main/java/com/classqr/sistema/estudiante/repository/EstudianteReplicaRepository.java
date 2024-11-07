@@ -11,4 +11,6 @@ public interface EstudianteReplicaRepository extends JpaRepository<EstudianteEnt
 
     Optional<EstudianteEntity> findByCodigoEstudiante(String codigoEstudiante);
 
+    Boolean existsByCodigoEstudiante(String codigoEstudiante);
+
 }
