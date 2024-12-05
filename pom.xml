@@ -94,7 +94,7 @@
 		<dependency>
 			<groupId>com.classqr.sistema</groupId>
 			<artifactId>commons</artifactId>
-			<version>0.0.30</version>
+			<version>0.0.33</version>
 		</dependency>
 	</dependencies>
 

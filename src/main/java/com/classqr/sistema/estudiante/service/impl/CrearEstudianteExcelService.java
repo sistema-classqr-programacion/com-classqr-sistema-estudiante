@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
@@ -43,65 +44,70 @@ public class CrearEstudianteExcelService implements ICrearEstudianteExcelService
     @Transactional
     public RespuestaGeneralDTO crearEstudiantesExcel(MultipartFile file) {
         RespuestaGeneralDTO respuestaGeneralDTO = new RespuestaGeneralDTO();
+
         if (file.isEmpty()) {
-            respuestaGeneralDTO.setMessage("Por favor, sube un archivo válido.");
-            respuestaGeneralDTO.setData(new ArrayList<>());
-            respuestaGeneralDTO.setStatus(HttpStatus.BAD_REQUEST);
-            return respuestaGeneralDTO;
+            return crearRespuesta(HttpStatus.BAD_REQUEST, "Por favor, sube un archivo válido.", new ArrayList<>());
         }
-        try(Workbook workbook = new XSSFWorkbook(file.getInputStream())){
-            Sheet sheet = workbook.getSheetAt(0); // Leer la primera hoja del archivo
-            // Verificar las cabeceras
-            Row headerRow = sheet.getRow(0);
-            if (!areHeadersValid(headerRow)) {
-                respuestaGeneralDTO.setMessage("Las cabeceras del archivo no son válidas.");
-                respuestaGeneralDTO.setData(new ArrayList<>());
-                respuestaGeneralDTO.setStatus(HttpStatus.BAD_REQUEST);
-                return respuestaGeneralDTO;
+
+        try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
+            Sheet sheet = workbook.getSheetAt(0);
+
+            // Validar cabeceras
+            if (!areHeadersValid(sheet.getRow(0))) {
+                return crearRespuesta(HttpStatus.BAD_REQUEST, "Las cabeceras del archivo no son válidas.", new ArrayList<>());
             }
 
-            // Procesar filas
+            // Procesar filas del archivo
             List<EstudianteDTO> estudiantes = estudianteExcelMapper.rowToListEstudianteDTO(sheet);
 
-            // Crear un ExecutorService con 3 hilos
-            ExecutorService executorService = Executors.newFixedThreadPool(3);
+            // Procesar estudiantes en paralelo
+            procesarEnParalelo(estudiantes);
 
-            // Dividir la lista de estudiantes en 3 sublistas
-            int batchSize = (int) Math.ceil(estudiantes.size() / 3.0);
-            List<List<EstudianteDTO>> subLists = List.of(
-                    estudiantes.subList(0, Math.min(batchSize, estudiantes.size())),
-                    estudiantes.subList(Math.min(batchSize, estudiantes.size()), Math.min(2 * batchSize, estudiantes.size())),
-                    estudiantes.subList(Math.min(2 * batchSize, estudiantes.size()), estudiantes.size())
-            );
+            return crearRespuesta(HttpStatus.CREATED, "Se creó correctamente el usuario.", new ArrayList<>());
 
-            // Procesar cada sublista en paralelo
-            for (List<EstudianteDTO> subList : subLists) {
-                executorService.submit(() -> processEstudiantes(subList));
-            }
-
-            // Apagar el ExecutorService
-            executorService.shutdown();
-
-            respuestaGeneralDTO.setMessage("Se creo correctamente el usuario");
-            respuestaGeneralDTO.setData(new ArrayList<>());
-            respuestaGeneralDTO.setStatus(HttpStatus.CREATED);
-        }catch (Exception e){
-            log.error("Error en crear el estudiante ", e);
-            respuestaGeneralDTO.setMessage("Error en crear el estudiante");
-            respuestaGeneralDTO.setStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+        } catch (Exception e) {
+            log.error("Error en crear estudiantes: {}", e.getMessage(), e);
+            return crearRespuesta(HttpStatus.INTERNAL_SERVER_ERROR, "Error en crear estudiantes.", new ArrayList<>());
         }
-        return respuestaGeneralDTO;
     }
 
+    /**
+     * Procesa la lista de estudiantes en paralelo, dividiendo la carga en sublistas.
+     *
+     * @param estudiantes lista de estudiantes a procesar.
+     */
+    private void procesarEnParalelo(List<EstudianteDTO> estudiantes) {
+        int numThreads = Math.min(3, estudiantes.size());
+        ExecutorService executorService = Executors.newFixedThreadPool(numThreads);
+
+        // Dividir la lista en sublistas
+        int batchSize = (int) Math.ceil(estudiantes.size() / (double) numThreads);
+        for (int i = 0; i < estudiantes.size(); i += batchSize) {
+            List<EstudianteDTO> subList = estudiantes.subList(i, Math.min(i + batchSize, estudiantes.size()));
+            executorService.submit(() -> processEstudiantes(subList));
+        }
+
+        // Apagar el ExecutorService
+        executorService.shutdown();
+    }
+
+    /**
+     * Procesa y guarda una lista de estudiantes en la base de datos.
+     *
+     * @param estudiantes sublista de estudiantes a procesar.
+     */
     private void processEstudiantes(List<EstudianteDTO> estudiantes) {
         for (EstudianteDTO estudianteDTO : estudiantes) {
             try {
-                String codigo = Utilidades.generarCodigo(CodigoUsuarioEnum.ESTUDIANTE);
-                while (estudianteReplicaRepository.existsByCodigoEstudiante(codigo)) {
-                    codigo = Utilidades.generarCodigo(CodigoUsuarioEnum.ESTUDIANTE);
-                }
+                // Generar código único para el estudiante
+                String codigo = generarCodigoUnico();
+
+                // Configurar datos del estudiante
                 estudianteDTO.setCodigoEstudiante(codigo);
-                estudianteDTO.setNumeroDocumento(passwordEncoder.encode(estudianteDTO.getNumeroDocumento()));
+                log.info(estudianteDTO.getNumeroDocumento().trim());
+                estudianteDTO.setNumeroDocumento(passwordEncoder.encode(estudianteDTO.getNumeroDocumento().trim()));
+
+                // Guardar en la base de datos
                 estudianteReplicaRepository.save(estudianteMapper.dtoToEntity(estudianteDTO));
             } catch (Exception e) {
                 log.error("Error al procesar estudiante: {}", estudianteDTO, e);
@@ -109,6 +115,25 @@ public class CrearEstudianteExcelService implements ICrearEstudianteExcelService
         }
     }
 
+    /**
+     * Genera un código único para un estudiante.
+     *
+     * @return el código único generado.
+     */
+    private String generarCodigoUnico() {
+        String codigo;
+        do {
+            codigo = Utilidades.generarCodigo(CodigoUsuarioEnum.ESTUDIANTE);
+        } while (estudianteReplicaRepository.existsByCodigoEstudiante(codigo));
+        return codigo;
+    }
+
+    /**
+     * Valida si las cabeceras del archivo son correctas.
+     *
+     * @param headerRow la fila que contiene las cabeceras.
+     * @return true si las cabeceras son válidas, false en caso contrario.
+     */
     private boolean areHeadersValid(Row headerRow) {
         if (headerRow == null) return false;
 
@@ -121,4 +146,19 @@ public class CrearEstudianteExcelService implements ICrearEstudianteExcelService
         return true;
     }
 
+    /**
+     * Crea un objeto {@link RespuestaGeneralDTO}.
+     *
+     * @param status  el estado HTTP de la respuesta.
+     * @param message el mensaje de la respuesta.
+     * @param data    los datos adicionales de la respuesta.
+     * @return un objeto {@link RespuestaGeneralDTO}.
+     */
+    private RespuestaGeneralDTO crearRespuesta(HttpStatus status, String message, Object data) {
+        RespuestaGeneralDTO respuesta = new RespuestaGeneralDTO();
+        respuesta.setStatus(status);
+        respuesta.setMessage(message);
+        respuesta.setData(data);
+        return respuesta;
+    }
 }
