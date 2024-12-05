@@ -60,7 +60,7 @@ public class ConsultaCursoEstudianteService implements IConsultaCursoEstudianteS
             List<EstudianteDTO> estudiantes = cursoEstudianteRepository.findAllEstudianteCurso(codigoCurso);
 
             // Completar información de asistencia para cada estudiante
-            List<EstudianteDTO> estudiantesConAsistencia = completarAsistenciaEstudiantes(estudiantes);
+            List<EstudianteDTO> estudiantesConAsistencia = completarAsistenciaEstudiantes(estudiantes, codigoCurso);
 
             // Configurar la respuesta exitosa
             respuestaGeneralDTO.setData(estudiantesConAsistencia);
@@ -82,10 +82,10 @@ public class ConsultaCursoEstudianteService implements IConsultaCursoEstudianteS
      * @param estudiantes la lista de estudiantes obtenida del repositorio.
      * @return una lista de objetos {@link EstudianteDTO} con la información de asistencia actualizada.
      */
-    private List<EstudianteDTO> completarAsistenciaEstudiantes(List<EstudianteDTO> estudiantes) {
+    private List<EstudianteDTO> completarAsistenciaEstudiantes(List<EstudianteDTO> estudiantes, String codigoCurso) {
         return estudiantes.stream()
                 .peek(estudiante -> estudiante.setAsistio(
-                        asistenciaRepository.existsByCodigoEstudianteFk_CodigoEstudiante(estudiante.getCodigoEstudiante())
+                        asistenciaRepository.existsByCodigoEstudianteFk_CodigoEstudianteAndCodigoCursoFk_CodigoCurso(estudiante.getCodigoEstudiante(),codigoCurso)
                 ))
                 .collect(Collectors.toList());
     }
